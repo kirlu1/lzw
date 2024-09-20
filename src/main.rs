@@ -22,16 +22,14 @@ fn main() {
     let input = buffer.chars()
     .collect::<Vec<char>>();
 
-    let uncompressed_size = buffer.len();
+    let uncompressed_size = input.len();
     
     let encoded = encoder.encode(input);
     let compressed_size = encoded.bits.len();
 
     let to_decompress = encoded.bits.clone();
     
-
     encoded.to_file("compressed.txt");
-
 
     println!("Uncompressed size: {}", uncompressed_size);
     println!("Compressed size: {}", compressed_size);
