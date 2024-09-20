@@ -1,4 +1,3 @@
-use std::borrow::BorrowMut;
 use std::char;
 use std::collections::BTreeMap;
 
@@ -44,7 +43,7 @@ fn main() {
 
     let decoder = LzwDecoder::new();
 
-    let mut uncompressed = decoder.decode(to_decompress);
+    let uncompressed = decoder.decode(to_decompress);
 
     File::create("uncompressed.txt").unwrap().write_all(uncompressed.as_bytes()).expect("coulnd't write uncompressed");
 
