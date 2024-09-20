@@ -1,7 +1,16 @@
+use std::borrow::BorrowMut;
+use std::char;
 use std::collections::BTreeMap;
 
 use std::fs::File;
 use std::io::{Read, Write};
+
+type IntType = usize;
+
+const INTTYPE_BITS : IntType = (0 as IntType).count_zeros() as IntType;
+
+const ALPHABET: &str = " abcdefghijklmnopqrstuvwxyzæøå";
+
 
 fn main() {
 
@@ -14,27 +23,33 @@ fn main() {
         .expect("failed reading into buffer");
 
     buffer = buffer.to_lowercase();
+    let input = buffer.chars()
+    .collect::<Vec<char>>();
 
-    println!("{}", buffer);
     let uncompressed_size = buffer.len();
     
-    let encoded = encoder.encode(buffer.as_bytes());
+    let encoded = encoder.encode(input);
     let compressed_size = encoded.bits.len();
 
+    let to_decompress = encoded.bits.clone();
+    
+
     encoded.to_file("compressed.txt");
+
 
     println!("Uncompressed size: {}", uncompressed_size);
     println!("Compressed size: {}", compressed_size);
 
-    println!("Percent size of original: {}%", (compressed_size as f64 / uncompressed_size as f64) * 100f64)
+    println!("Percent size of original: {}%", (compressed_size as f64 / uncompressed_size as f64) * 100f64);
+
+    let decoder = LzwDecoder::new();
+
+    let mut uncompressed = decoder.decode(to_decompress);
+
+    File::create("uncompressed.txt").unwrap().write_all(uncompressed.as_bytes()).expect("coulnd't write uncompressed");
+
 }
 
-type IntType = usize;
-
-const INTTYPE_BITS : IntType = (0 as IntType).count_zeros() as IntType;
-
-// Fortunately, all characters in our initial alphabet are defined by a single byte
-const ALPHABET: &str = " abcdefghijklmnopqrstuvwxyzæøå";
 
 #[derive(Debug, Clone)]
 struct Bits {
@@ -43,16 +58,15 @@ struct Bits {
 }
 
 struct LzwEncoder {
-    dict: BTreeMap<Vec<u8>, Vec<IntType>>,
+    dict: BTreeMap<Vec<char>, Vec<IntType>>,
     word_size: IntType,
     next_word: Vec<IntType>,
 }
 
 struct LzwDecoder {
-    bitstream: Vec<IntType>,
-    dict: BTreeMap<Vec<IntType>, Vec<u8>>,
+    dict: BTreeMap<Vec<IntType>, Vec<char>>,
     word_size: IntType,
-
+    next_word: Vec<IntType>,
 }
 
 
@@ -150,13 +164,13 @@ impl Bits {
 
 impl LzwEncoder {
     fn new() -> Self {
-        let dict = BTreeMap::<Vec<u8>, Vec<IntType>>::new();
+        let dict = BTreeMap::<Vec<char>, Vec<IntType>>::new();
 
         let next_word = vec![0];
 
         let mut encoder = LzwEncoder { dict, word_size : 0, next_word };
         
-        for c in ALPHABET.bytes() {
+        for c in ALPHABET.chars() {
             encoder.insert(vec![c]);
         }
 
@@ -166,22 +180,24 @@ impl LzwEncoder {
     /// Attempt to insert a new sequence of characters into the dictionary with a new codeword.
     /// 
     /// Returns false if the sequence already has a codeword.
-    fn insert(&mut self, sequence : Vec<u8>) -> bool {
+    fn insert(&mut self, sequence : Vec<char>) -> bool {
         if self.dict.contains_key(&sequence) {
             return false;
         }
         
-        self.dict.insert(sequence, self.next_word.clone());
+        let codeword = self.next_word();
 
-        self.increment_word();
+        self.dict.insert(sequence, codeword);
 
-        self.word_size = ((self.dict.len() - 1).checked_ilog2().unwrap_or(0) + 1) as IntType;
+        self.word_size = ((self.dict.len()-1).checked_ilog2().unwrap_or(0) + 1) as IntType;
 
         return true
     }
 
-    fn increment_word(&mut self) {
-        let mut changed : bool;
+    // Could be put into trait??
+    fn next_word(&mut self) -> Vec<IntType> {
+        let old = self.next_word.clone();
+
         for n in self.next_word.iter_mut().rev() {
             *n+=1;
             if *n != 0 {
@@ -193,14 +209,19 @@ impl LzwEncoder {
             self.next_word.push(0);
             self.next_word[0]+=1;
         }
+        return old
     }
 
-    fn encode(mut self, input : &[u8]) -> Bits {
+    fn encode(mut self, input : Vec<char>) -> Bits {
 
         let mut output : Bits = Bits { bits : vec![], size : 0 };
-        let mut sequence: Vec<u8> = vec![];
+        let mut sequence: Vec<char> = vec![];
 
+        
         for i in 0..input.len() {
+            // Insertion into dict changes word_size before appending to output
+            let current_word_size = self.word_size;
+
             sequence.push(input[i]);    
 
             if self.insert(sequence.clone()) {
@@ -211,9 +232,13 @@ impl LzwEncoder {
                     panic!("Alphabet not comprehensive");
                 }
                 let codeword = self.dict.get(&sequence).expect("encoding should exist").clone();
+
                 sequence.clear();
+                sequence.push(input[i]); 
+
                 
-                output = output.concat(Bits::new(codeword, self.word_size));
+
+                output = output.concat(Bits::new(codeword, current_word_size));
             }
         }
 
@@ -227,12 +252,131 @@ impl LzwEncoder {
 }
 
 
-// cScSc
 impl LzwDecoder {
     fn new() -> Self {
-        todo!()
+        let dict = BTreeMap::<Vec<IntType>, Vec<char>>::new();
+
+        let mut decoder = LzwDecoder {
+            dict,
+            word_size : 0,
+            next_word : vec![0],
+        };
+        
+        for c in ALPHABET.chars() {
+            let codeword = decoder.next_word();
+            decoder.dict.insert(codeword, vec![c]);
+        }
+
+        decoder.word_size = ((decoder.dict.len() - 1).checked_ilog2().unwrap_or(0) + 1) as IntType;
+
+        decoder
+    }
+
+    fn next_word(&mut self) -> Vec<IntType> {
+        let old = self.next_word.clone();
+
+        for n in self.next_word.iter_mut().rev() {
+            *n+=1;
+            if *n != 0 {
+                break
+            }
+        }
+
+        if self.next_word[0] == 0 {
+            self.next_word.push(0);
+            self.next_word[0]+=1;
+        }
+        return old
+    }
+
+
+
+    fn insert(&mut self, sequence : Vec<char>) -> bool {
+
+        let next_word = self.next_word();
+        self.dict.insert(next_word, sequence);
+
+        self.word_size = ((self.dict.len()).checked_ilog2().unwrap_or(0) + 1) as IntType;
+
+        return true
+    }
+
+
+    fn decode(mut self, mut input : Vec<IntType>) -> String {
+        let true_length = input.len();
+        let ratio = INTTYPE_BITS / 8;
+        let disalignment = (ratio - (input.len() as IntType % ratio)) % ratio;
+
+        input.append(&mut vec![0; disalignment.into()]);
+
+        let input : &[IntType] = bytemuck::cast_slice(&input[..]);
+        let mut output = vec![];
+
+        let mut bit_idx = 0;
+        let mut idx = 0;
+
+        let mut sequence_buffer : Vec<char> = vec![];
+
+        let mut last_inserted = vec![];
+
+
+        while idx < true_length {
+            let start_idx = idx;
+            let end_idx = idx + (self.word_size + bit_idx).div_ceil(INTTYPE_BITS) as usize;
+            let new_bit_idx = bit_idx + self.word_size;
+
+            let mut codeword = input[start_idx..=end_idx-1].to_vec();
+            let subslice_length = codeword.len();
+
+            // Zero out irrelevant bits
+            codeword[0] &= IntType::MAX >> bit_idx;
+
+            // Shift entire sequence to the right, by number of irrelevant bits
+            let right_space = codeword.len() as IntType * INTTYPE_BITS - bit_idx - self.word_size;
+
+
+            codeword[subslice_length-1] >>= right_space;
+            for i in (1..subslice_length).rev() {
+                codeword[i] |= codeword[i-1] << (INTTYPE_BITS - right_space);
+                codeword[i-1] >>= right_space;
+            }
+
+            // Remove irrelevant 0 elements to make sure sequence exists in dictionary
+            codeword = codeword.into_iter().skip_while(|a| *a==0).collect::<Vec<IntType>>();
+            if codeword.len() == 0 {
+                codeword = vec![0];
+            }
+
+            let characters = self.dict.get(&codeword).unwrap_or_else(
+                || {
+                    last_inserted.push(last_inserted[0]);
+                    &last_inserted
+                }
+            ).clone();
+
+            output.extend(characters.clone());
+
+            if !sequence_buffer.is_empty() {
+                sequence_buffer.push(characters[0]);
+                self.insert(sequence_buffer.clone());
+                // Handle cScSc case
+                last_inserted = sequence_buffer.clone();
+
+                sequence_buffer.clear()
+            }
+
+            sequence_buffer.extend(characters);
+            
+            bit_idx = new_bit_idx % INTTYPE_BITS;
+            idx = end_idx-1;
+            if bit_idx == 0 {
+                idx+=1;
+            }
+        }
+
+
+        output
+            .into_iter()
+            .collect::<String>()
     }
 }
-
-
-
