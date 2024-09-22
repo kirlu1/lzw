@@ -5,7 +5,7 @@ mod huffman;
 use huffman::*;
 
 use std::fs::File;
-use std::io::{stdout, Read, Write};
+use std::io::{Read, Write};
 
 type IntType = usize;
 
@@ -207,9 +207,9 @@ fn u8_to_usize(mut i : Vec<u8>) -> Vec<usize> {
 
 
 
-
+#[cfg(test)]
 mod bits_test {
-    use crate::{Bits, IntType};
+    use crate::Bits;
 
     #[test]
     fn concat_test() {
@@ -276,6 +276,7 @@ mod bits_test {
 
 
 #[cfg(target_arch="x86_64")]
+#[cfg(test)]
 mod casting_tests {
     use crate::*;
 
