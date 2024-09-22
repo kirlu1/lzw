@@ -40,9 +40,17 @@ fn main() {
 
     // Further compress with Huffman encoding
     let hm_lzw_encoded = HuffmanEncoder::new().encode(&usize_to_u8(&lzw_encoded.bits));
-    println!("\nHuffman compressed size (with/without tree): {} / {}", hm_lzw_encoded.len(), hm_lzw_encoded.len() - 512);
-    println!("Percent of previous previous compressed size: {:.2}%", (hm_lzw_encoded.len() as f64 / compressed_size as f64) * 100f64);
-    println!("Percent size of original: {:.2}%", (hm_lzw_encoded.len() as f64 / uncompressed_size as f64) * 100f64);
+
+    let hm_lzw_size = hm_lzw_encoded.len();
+    let no_tree_size = hm_lzw_size - 512;
+
+    println!("\nHuffman compressed size:  {}", hm_lzw_size);
+    println!("Percent of previous previous compressed size: {:.2}%", (hm_lzw_size as f64 / compressed_size as f64) * 100f64);
+    println!("Percent size of original: {:.2}%", (hm_lzw_size as f64 / uncompressed_size as f64) * 100f64);
+
+    println!("\nHuffman compressed size without tree:  {}", no_tree_size);
+    println!("Percent of previous previous compressed size: {:.2}%", (no_tree_size as f64 / compressed_size as f64) * 100f64);
+    println!("Percent size of original: {:.2}%", (no_tree_size as f64 / uncompressed_size as f64) * 100f64);
 
     File::create("hm_lzw_compressed.bin").unwrap().write_all(&mut hm_lzw_encoded.clone()).unwrap();
 
