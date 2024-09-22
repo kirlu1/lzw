@@ -174,7 +174,6 @@ impl LzwDecoder {
 
         let mut last_inserted = vec![];
 
-
         while idx < true_length {
             let start_idx = idx;
             let end_idx = idx + (self.word_size + bit_idx).div_ceil(INTTYPE_BITS) as usize;

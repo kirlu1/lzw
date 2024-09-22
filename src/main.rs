@@ -1,22 +1,20 @@
 mod lzw;
 use lzw::*;
 
+mod huffman;
+use huffman::*;
+
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{stdout, Read, Write};
 
 type IntType = usize;
 
 const INTTYPE_BITS : IntType = (0 as IntType).count_zeros() as IntType;
 
 fn main() {
-
     let encoder = LzwEncoder::new();
-
     let mut buffer = String::new();
-    File::open("folktale.txt")
-        .expect("failed opening file")
-        .read_to_string(&mut buffer)
-        .expect("failed reading into buffer");
+    File::open("folktale.txt").unwrap().read_to_string(&mut buffer).unwrap();
 
     buffer = buffer.to_lowercase();
     let input = buffer.chars()
@@ -24,28 +22,40 @@ fn main() {
 
     let uncompressed_size = input.len();
     
-    let encoded = encoder.encode(input);
-    let compressed_size = encoded.bits.len();
+    let lzw_encoded = encoder.encode(input);
 
-    let to_decompress = encoded.bits.clone();
+    let bytes: &[u8] = bytemuck::cast_slice(&lzw_encoded.bits[..]);
+    let compressed_size = bytes.len();
     
-    encoded.to_file("compressed.txt");
+    lzw_encoded.clone().to_file("lzw_compressed.bin");
 
     println!("Uncompressed size: {}", uncompressed_size);
     println!("Compressed size: {}", compressed_size);
-
-    println!("Percent size of original: {}%", (compressed_size as f64 / uncompressed_size as f64) * 100f64);
+    println!("Percent size of original: {:.2}%", (compressed_size as f64 / uncompressed_size as f64) * 100f64);
 
     let decoder = LzwDecoder::new();
+    let uncompressed = decoder.decode(lzw_encoded.bits.clone());
+    File::create("lzw_uncompressed.txt").unwrap().write_all(uncompressed.as_bytes()).unwrap();
 
-    let uncompressed = decoder.decode(to_decompress);
 
-    File::create("uncompressed.txt").unwrap().write_all(uncompressed.as_bytes()).expect("coulnd't write uncompressed");
+    // Further compress with Huffman encoding
+    let hm_lzw_encoded = HuffmanEncoder::new().encode(&usize_to_u8(&lzw_encoded.bits));
+    println!("\nHuffman compressed size: {}", hm_lzw_encoded.len());
+    println!("Percent of previous previous compressed size: {:.2}%", (hm_lzw_encoded.len() as f64 / compressed_size as f64) * 100f64);
+    println!("Percent size of original: {:.2}%", (hm_lzw_encoded.len() as f64 / uncompressed_size as f64) * 100f64);
+
+    File::create("hm_lzw_compressed.bin").unwrap().write_all(&mut hm_lzw_encoded.clone()).unwrap();
+
+    let hm_decoded = HuffmanDecoder::new().decode(&hm_lzw_encoded);
+    let bytes: Vec<usize> = u8_to_usize(hm_decoded);
+    let hm_lzw_decoded = LzwDecoder::new().decode(bytes);
+
+    File::create("hm_lzw_decoded.txt").unwrap().write(hm_lzw_decoded.as_bytes()).unwrap();
 
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct Bits {
     bits: Vec<IntType>,
     size: IntType,
@@ -140,4 +150,146 @@ impl Bits {
 
         newfile.write_all(bytes).expect("failed to write entire buffer");
     }
+
+    // Push a single bit onto a right adjusted Bits
+    fn push_from_left(&mut self, value : IntType) {
+        if self.size % INTTYPE_BITS == 0 {
+            let mut front_bit = vec![0];
+            std::mem::swap(&mut self.bits, &mut front_bit);
+            self.bits.extend(front_bit);
+        }
+
+        let shift = self.size % INTTYPE_BITS;
+        let mask = value << shift;
+        self.bits[0] |= mask;
+
+        self.size+=1;
+    }
+}
+
+
+fn usize_to_u8(i : &[usize]) -> Vec<u8> {
+    i.into_iter()
+        .flat_map(
+            |i|
+                bytemuck::cast::<usize, [u8; 8]>(*i).into_iter().rev()
+            )
+        .collect::<Vec<u8>>()
+}
+
+
+fn u8_to_usize(mut i : Vec<u8>) -> Vec<usize> {
+    let ratio = INTTYPE_BITS / 8; 
+    let disalignment = (ratio - (i.len() % ratio)) % ratio;
+    i.extend(vec![0; disalignment]);
+
+    let (mut segment, mut remainder) = i.split_at(ratio);
+    let mut new_vec : Vec<u8> = vec![];
+    new_vec.extend(segment.iter().rev());
+
+    while remainder.len() > 0 {
+        (segment, remainder) = remainder.split_at(ratio);
+        new_vec.extend(segment.iter().rev());
+    }
+
+    bytemuck::cast_slice::<u8, usize>(&new_vec[..]).to_vec()
+}
+
+
+
+
+
+
+mod bits_test {
+    use crate::{Bits, IntType};
+
+    #[test]
+    fn concat_test() {
+        let input1 = Bits {
+            bits : vec![
+                0b10000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000
+                ],
+                size : 1,
+            };
+        let input2 = Bits { bits : vec![1], size : 1};
+
+        let target = Bits {
+            bits : vec![
+                0b11000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000
+                ],
+                size : 2,
+            };
+
+        assert_eq!(input1.concat(input2), target);
+
+        let input1 = Bits {
+            bits : vec![
+                0b10000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000
+                ],
+                size : 1,
+            };
+        let input2 = Bits { bits : vec![
+            0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000001,
+            0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000001,
+        ], size : 65};
+
+        let target = Bits {
+            bits : vec![
+                0b11000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000,
+                0b01000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000,
+                ],
+                size : 66,
+            };
+
+        assert_eq!(input1.concat(input2), target);
+
+    }
+
+
+    #[test]
+    fn left_shift_test() {
+        let input = Bits { bits : vec![1], size : 1};
+        let target = Bits {
+            bits : vec![
+                0b10000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000
+            ],
+            size : 1,
+        };
+    
+        assert_eq!(input.shift_left(), target);
+
+    }
+
+}
+
+
+
+
+
+
+#[cfg(target_arch="x86_64")]
+mod casting_tests {
+    use crate::*;
+
+
+    #[test]
+    fn u8_to_usize_test() {
+        let inp : &[u8] = &[0b0000_0001, 0b0000_0000, 0b0000_0011, 0b0000_0000, 0b0000_0111, 0b0000_0000, 0b0000_1111, 0b0000_0000];
+        let output = u8_to_usize(inp.to_vec());
+        let target  = &[0b0000_0001_0000_0000_0000_0011_0000_0000_0000_0111_0000_0000_0000_1111_0000_0000usize];
+
+        assert_eq!(*target, *output);
+    }
+
+    #[test]
+    fn usize_to_u8_test() {
+        let inp = [0b0000_0001_0000_0000_0000_0011_0000_0000_0000_0011_0000_0000_0000_1001_0000_0000usize];
+        let output = usize_to_u8(&inp);
+        let target : &[u8] = &[0b0000_0001, 0b0000_0000, 0b0000_0011, 0b0000_0000, 0b0000_0011, 0b0000_0000, 0b0000_1001, 0b0000_0000];
+
+        assert_eq!(target, &output);
+    }
+
+
+
 }
