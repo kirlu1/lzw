@@ -47,7 +47,7 @@ impl HuffmanEncoder {
         }
 
 
-        // First 256 bytes are dedicated to character frequency
+        // First 512 bytes are dedicated to character frequency
         let mut transmission = Vec::from(bytemuck::cast_slice::<u16, u8>(&transmitted_counts));
 
         let output = usize_to_u8(&output.bits);
