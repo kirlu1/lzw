@@ -7,59 +7,81 @@ use huffman::*;
 use std::fs::File;
 use std::io::{Read, Write};
 
+use clap::{Arg, ArgAction, Command};
+
 type IntType = usize;
 
 const INTTYPE_BITS : IntType = (0 as IntType).count_zeros() as IntType;
 
 fn main() {
-    let encoder = LzwEncoder::new();
-    let mut buffer = String::new();
-    File::open("folktale.txt").unwrap().read_to_string(&mut buffer).unwrap();
+    let matches = Command::new("lzw")
+        .about("LZW implementation")
+        .arg(
+            Arg::new("decompress")
+                .action(ArgAction::SetTrue)
+                .short('d')
+                .help("Decompress target file instead of compressing"),
+        )
+        .arg(
+            Arg::new("hm")
+                .action(ArgAction::SetTrue)
+                .long("hm")
+                .help("Apply huffman codec after/before lzw"),
+        )
+        .arg(
+            Arg::new("input")
+                .help("Path to input file")
+                .required(true)
+        )
+        .get_matches();
 
-    buffer = buffer.to_lowercase();
-    let input = buffer.chars()
-    .collect::<Vec<char>>();
 
-    let uncompressed_size = input.len();
+    // Get handle to input file
+    let mut input_file = File::open(
+        matches.get_one::<String>("input")
+        .expect("Input file argument required")
+    )
+    .expect("File given as input must exist");
+
+
+    // Check if decompress flag was passed
+    if matches.get_flag("decompress") {
+        let decoder = LzwDecoder::new();
+
+        let mut buffer = Vec::new();
+        input_file.read_to_end(&mut buffer).unwrap();
     
-    let lzw_encoded = encoder.encode(input);
+        if matches.get_flag("hm") {
+            buffer = HuffmanDecoder::new().decode(&buffer);
+        }
 
-    let bytes: &[u8] = bytemuck::cast_slice(&lzw_encoded.bits[..]);
-    let compressed_size = bytes.len();
-    
-    lzw_encoded.clone().to_file("lzw_compressed.bin");
+        let output_cast: Vec<usize> = u8_to_usize(buffer);
 
-    println!("Uncompressed size: {}", uncompressed_size);
-    println!("Compressed size: {}", compressed_size);
-    println!("Percent size of original: {:.2}%", (compressed_size as f64 / uncompressed_size as f64) * 100f64);
+        let decompressed = decoder.decode(output_cast);
+        File::create("decompressed.txt").unwrap().write_all(decompressed.as_bytes()).unwrap();
 
-    let decoder = LzwDecoder::new();
-    let uncompressed = decoder.decode(lzw_encoded.bits.clone());
-    File::create("lzw_uncompressed.txt").unwrap().write_all(uncompressed.as_bytes()).unwrap();
+    } else {
+        let encoder = LzwEncoder::new();
+        let mut buffer = String::new();
 
+        input_file.read_to_string(&mut buffer).unwrap();
 
-    // Further compress with Huffman encoding
-    let hm_lzw_encoded = HuffmanEncoder::new().encode(&usize_to_u8(&lzw_encoded.bits));
+        buffer = buffer.to_lowercase();
+        let input = buffer.chars()
+        .collect::<Vec<char>>();
 
-    let hm_lzw_size = hm_lzw_encoded.len();
-    let no_tree_size = hm_lzw_size - 512;
+        let lzw_compressed = encoder.encode(input);
 
-    println!("\nHuffman compressed size:  {}", hm_lzw_size);
-    println!("Percent of previous previous compressed size: {:.2}%", (hm_lzw_size as f64 / compressed_size as f64) * 100f64);
-    println!("Percent size of original: {:.2}%", (hm_lzw_size as f64 / uncompressed_size as f64) * 100f64);
+        if matches.get_flag("hm") {
+            // Further compress with Huffman encoding
+            let mut hm_lzw_encoded = HuffmanEncoder::new().encode(&usize_to_u8(&lzw_compressed.bits));
 
-    println!("\nHuffman compressed size without tree:  {}", no_tree_size);
-    println!("Percent of previous previous compressed size: {:.2}%", (no_tree_size as f64 / compressed_size as f64) * 100f64);
-    println!("Percent size of original: {:.2}%", (no_tree_size as f64 / uncompressed_size as f64) * 100f64);
+            File::create("hm_lzw_compressed").unwrap().write_all(&mut hm_lzw_encoded).unwrap();
 
-    File::create("hm_lzw_compressed.bin").unwrap().write_all(&mut hm_lzw_encoded.clone()).unwrap();
-
-    let hm_decoded = HuffmanDecoder::new().decode(&hm_lzw_encoded);
-    let bytes: Vec<usize> = u8_to_usize(hm_decoded);
-    let hm_lzw_decoded = LzwDecoder::new().decode(bytes);
-
-    File::create("hm_lzw_decoded.txt").unwrap().write(hm_lzw_decoded.as_bytes()).unwrap();
-
+        } else {
+            lzw_compressed.to_file("lzw_compressed")
+        }
+    }
 }
 
 
@@ -154,7 +176,7 @@ impl Bits {
     fn to_file(self, filename : &str) {
         let mut newfile = File::create(filename).expect("couldn't create file");
 
-        let bytes = bytemuck::cast_slice::<IntType, u8>(&self.bits[..]);
+        let bytes = &usize_to_u8(&self.bits[..]);
 
         newfile.write_all(bytes).expect("failed to write entire buffer");
     }

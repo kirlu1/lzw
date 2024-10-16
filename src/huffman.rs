@@ -72,6 +72,7 @@ impl HuffmanDecoder {
         let min_word = codeword_tree.iter().map(|leaf| leaf.codeword.size).min().expect("tree must have leaves");
         let max_word = codeword_tree.iter().map(|leaf| leaf.codeword.size).max().expect("tree must have leaves");
 
+        // Turn the tree built from the transmission into a map for Codeword -> Byte Value
         let tree_map = codeword_tree
             .into_iter()
             .map(|leaf| {
