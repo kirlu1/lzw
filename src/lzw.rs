@@ -52,7 +52,10 @@ impl LzwEncoder {
         return true
     }
 
-    // Could be put into trait??
+    /// Each new sequence of letters that is discovered
+    /// must have a different codeword. This function
+    /// returns an unused codeword, and readies the
+    /// next one.
     fn next_word(&mut self) -> Vec<IntType> {
         let old = self.next_word.clone();
 
@@ -70,6 +73,7 @@ impl LzwEncoder {
         return old
     }
 
+    /// Performs LZW compression
     pub fn encode(mut self, input : Vec<char>) -> Bits {
 
         let mut output : Bits = Bits { bits : vec![], size : 0 };
@@ -80,22 +84,31 @@ impl LzwEncoder {
             // Insertion into dict changes word_size before appending to output
             let current_word_size = self.word_size;
 
+            // Add next symbol to evaluated sequence
             sequence.push(input[i]);    
 
             if self.insert(sequence.clone()) {
-                // Insert succeeds
+                // Insert succeeded. We've found a new sequence
+
+                // Remove latest symbol
                 sequence.pop();
 
                 if sequence.len() == 0 {
                     panic!("Alphabet not comprehensive");
                 }
+
+                // Get previously existing codeword, not the most recently created
                 let codeword = self.dict.get(&sequence).expect("encoding should exist").clone();
 
+                // Empty read buffer for new symbols
                 sequence.clear();
+
+                // Last character of recently inserted codeword 
+                // is first in new sequence
                 sequence.push(input[i]); 
 
                 
-
+                // Zip bits together tightly
                 output = output.concat(Bits::new(codeword, current_word_size));
             }
         }
@@ -130,6 +143,7 @@ impl LzwDecoder {
         decoder
     }
 
+    // Same principle as LzwEncoder::next_word
     fn next_word(&mut self) -> Vec<IntType> {
         let old = self.next_word.clone();
 
@@ -147,6 +161,7 @@ impl LzwDecoder {
         return old
     }
 
+    /// Inserts a new mapping for Codeword -> Symbol Sequence
     fn insert(&mut self, sequence : Vec<char>) -> bool {
 
         let next_word = self.next_word();
@@ -156,6 +171,7 @@ impl LzwDecoder {
 
         return true
     }
+
 
     pub fn decode(mut self, mut input : Vec<IntType>) -> String {
         let true_length = input.len();
@@ -174,6 +190,7 @@ impl LzwDecoder {
 
         let mut last_inserted = vec![];
 
+        
         while idx < true_length {
             let start_idx = idx;
             let end_idx = idx + (self.word_size + bit_idx).div_ceil(INTTYPE_BITS) as usize;
@@ -213,6 +230,7 @@ impl LzwDecoder {
             if !sequence_buffer.is_empty() {
                 sequence_buffer.push(characters[0]);
                 self.insert(sequence_buffer.clone());
+
                 // Handle cScSc case
                 last_inserted = sequence_buffer.clone();
 
